@@ -45,6 +45,7 @@
               ((obj->interface->type == interface_file)  && (obj->format->type == format_binary_int16)) ||
               ((obj->interface->type == interface_file)  && (obj->format->type == format_binary_int24)) ||
               ((obj->interface->type == interface_file)  && (obj->format->type == format_binary_int32)) ||
+              ((obj->interface->type == interface_socket)  && (obj->format->type == format_binary_int32)) ||
               ((obj->interface->type == interface_soundcard)  && (obj->format->type == format_binary_int08)) ||
               ((obj->interface->type == interface_soundcard)  && (obj->format->type == format_binary_int16)) ||
               ((obj->interface->type == interface_soundcard)  && (obj->format->type == format_binary_int24)) ||
@@ -108,6 +109,12 @@
             case interface_soundcard:
 
                 src_hops_open_interface_soundcard(obj);
+
+            break;
+
+            case interface_socket:
+
+                src_hops_open_interface_socket(obj);
 
             break;
 
@@ -224,6 +231,24 @@
 
     }
 
+    void src_hops_open_interface_socket(src_hops_obj * obj) {
+
+        memset(&(obj->sserver), 0x00, sizeof(struct sockaddr_in));
+
+        obj->sserver.sin_family = AF_INET;
+        obj->sserver.sin_addr.s_addr = inet_addr(INADDR_ANY);
+        obj->sserver.sin_port = htons(obj->interface->port);
+        obj->sid = socket(AF_INET, SOCK_DGRAM, 0);
+
+        if ( bind(obj->sid , (struct sockaddr *) &(obj->sserver), sizeof(obj->sserver)) < 0 ) {
+
+            printf("Sink pots: Cannot bind socket\n");
+            exit(EXIT_FAILURE);
+
+        }
+
+    }
+
     void src_hops_close(src_hops_obj * obj) {
 
         switch(obj->interface->type) {
@@ -237,6 +262,12 @@
             case interface_soundcard:
 
                 src_hops_close_interface_soundcard(obj);
+
+            break;
+
+            case interface_socket:
+
+                src_hops_close_interface_socket(obj);
 
             break;
 
@@ -260,6 +291,12 @@
     void src_hops_close_interface_soundcard(src_hops_obj * obj) {
 
         snd_pcm_close(obj->ch);
+
+    }
+
+    void src_hops_close_interface_socket(src_hops_obj * obj) {
+
+        close(obj->sid);
 
     }
 
@@ -313,6 +350,12 @@
             case interface_soundcard:
 
                 rtnValue = src_hops_process_interface_soundcard(obj);
+
+            break;
+
+            case interface_socket:
+
+                rtnValue = src_hops_process_interface_socket(obj);
 
             break;
 
@@ -372,6 +415,39 @@
         }
 
         return rtnValue;
+
+    }
+
+    int src_hops_process_interface_socket(src_hops_obj * obj) {
+
+        char sbuffer[1208];
+        int recv_len;
+        int first = 1, head_len = 8;
+
+        char *buffer = obj->buffer;
+        int remaining_size = obj->bufferSize;
+        while (remaining_size > 0) {
+
+            recv_len = recvfrom(obj->sid, sbuffer, sizeof(sbuffer), 0, NULL, 0);
+            if (recv_len < 0) {
+                printf("Socket error.\n");
+                return -1;
+            }
+            if (sbuffer[0] != 2) { // ignore other types of data
+                continue;
+            }
+            if ( first && (sbuffer[3] != 0) ) { // start from first packet of a frame
+                continue;
+            }
+            first = 0;
+            memcpy(buffer, sbuffer + head_len, recv_len - head_len);
+            remaining_size -= recv_len - head_len;
+            buffer += recv_len - head_len;
+
+        }
+
+        //printf("Receive a frame.\n");
+        return 0;
 
     }
 
